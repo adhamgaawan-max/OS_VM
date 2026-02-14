@@ -10,7 +10,7 @@ if [ $# -lt 1 ]; then
 fi
 
 SRC="$1"
-OUT="${SRC%.cpp}"
+OUT="${SRC%.cpp}"enviu
 
 # Compile
 echo "Compiling $SRC..."
