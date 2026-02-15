@@ -180,3 +180,176 @@ else {
         wait(nullptr);
     }
 }
+
+// pause Function: Pauses shell execution until the user presses 'Enter"
+void pauseCmd() {
+ cout << "Press Enter to continue...";
+ cin.ignore();
+ cin.get();   
+
+}
+
+// run Function: Executes external programs entered by the user
+void runCommand(vector<string> parts) {
+
+    bool background = false;
+
+    // - Detects background execution ( if the last character is "&" )
+    if (!parts.empty() && parts.back() == "&") {
+        background = true;
+    // Remove "&" from arguments
+        parts.pop_back();  
+    }
+    // - Child process creation
+    pid_t pid = fork(); 
+
+    if (pid == 0) {  
+
+        // - Convert vector<string> to char* array for execvp
+        vector<char *> argv;
+        for (auto &p : parts)
+            argv.push_back(&p[0]);
+
+        argv.push_back(nullptr); 
+
+        // - Replace child with requested program
+        execvp(argv[0], argv.data()); 
+
+        perror("exec");
+        exit(1);
+
+        // - Parent process
+    } else if (pid > 0) {  
+
+        // - Wait for child to finish if its not in the background
+        if (!background)
+            waitpid(pid, nullptr, 0);  
+
+    } else {
+        perror("fork");
+    }
+}
+
+// main Loop
+int main(int argc, char *argv[]) {
+
+    // Option 1: Default input source is standard input from the user
+    istream *input = &cin;
+    ifstream batchFile;
+
+    // Option 2: if a batch file is provided, switch the input source
+    if (argc == 2) {
+        batchFile.open(argv[1]);
+        if (!batchFile) {
+            cerr << "Cannot open batch file\n";
+            return 1;
+        }
+        input = &batchFile;
+    }
+
+    string line;
+
+    while (true) {
+
+        // Zombie Process Cleanup: Clean up finished background child processes
+        // WNOHANG makes "waitpid" return immediately if no child has exited
+        while (waitpid(-1, nullptr, WNOHANG) > 0);
+
+    
+        if (input == &cin)
+            showPrompt();
+
+        // Read line of input
+        if (!getline(*input, line))
+            break;
+
+        // Tokenization of input
+        auto parts = splitLine(line);
+        if (parts.empty())
+            continue;
+
+       
+        // Save original STDIN and STDOUT
+        // File descriptors:
+        //  0 = standard input (STDIN)
+        //  1 = standard output (STDOUT)
+        // They are saved so they can be restored post redirection
+        int savedStdout = dup(STDOUT_FILENO);
+        int savedStdin  = dup(STDIN_FILENO);
+
+        int fdIn = -1, fdOut = -1;
+        bool error = false;
+
+        // Scan for <, >, >>
+        for (auto it = parts.begin(); it != parts.end();) {
+
+            // Input redirection: command < file
+            if (*it == "<") {
+                fdIn = open((it + 1)->c_str(), O_RDONLY);
+                if (fdIn < 0) { 
+                    perror("open input"); 
+                    error = true; 
+                    break; 
+                }
+
+                // Replace standard input (fd 0) with file descriptor
+                dup2(fdIn, STDIN_FILENO);
+                close(fdIn);
+
+                // Remove "< filename" from argument list
+                it = parts.erase(it, it + 2);
+            }
+
+
+            // Output redirection: command > file OR >> file
+            else if (*it == ">" || *it == ">>") {
+
+                bool append = (*it == ">>");
+
+                fdOut = open((it + 1)->c_str(),
+                             O_WRONLY | O_CREAT |
+                             (append ? O_APPEND : O_TRUNC),
+                             0644);
+
+                if (fdOut < 0) { perror("open output"); error = true; break; }
+
+                // Replace standard output (fd 1) with file descriptor
+                dup2(fdOut, STDOUT_FILENO);
+                close(fdOut);
+
+                // Remove "> filename" or ">> filename"
+                it = parts.erase(it, it + 2);
+            }
+
+            else ++it;
+        }
+
+       // Command Execution
+        if (!error && !parts.empty()) {
+
+            string cmd = parts[0];
+
+            // Built-in commands execution ( without child process)
+            if (cmd == "quit") break;
+            else if (cmd == "cd") cdCmd(parts);
+            else if (cmd == "dir") dirCmd(parts);
+            else if (cmd == "environ") envCmd();
+            else if (cmd == "set") setCmd(parts);
+            else if (cmd == "echo") echoCmd(parts);
+            else if (cmd == "help") helpCmd();
+            else if (cmd == "pause") pauseCmd();
+
+            // For running external commands
+            else runCommand(parts);   
+        }
+
+        // Restore original file descriptors
+        dup2(savedStdout, STDOUT_FILENO);
+        dup2(savedStdin, STDIN_FILENO);
+
+        close(savedStdout);
+        close(savedStdin);
+    }
+
+    return 0;
+}
