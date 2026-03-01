@@ -14,7 +14,7 @@ OUT="${SRC%.cpp}"enviu
 
 # Compile
 echo "Compiling $SRC..."
-g++ -std=c++17 -w "$SRC" -o "$OUT"
+g++ -pthread -std=c++17 -w "$SRC" -o "$OUT"
 
 # Run
 echo "Running $OUT..."
